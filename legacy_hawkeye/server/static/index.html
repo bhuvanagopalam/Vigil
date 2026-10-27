@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HawkEye</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<style>
+  :root { --bg: #0b0d12; --panel: #141821; --card: #1d2330; --fg: #e8ecf2; --dim: #8b95a7;
+          --acc: #4cc9f0; --ok: #3ddc84; --warn: #ffb020; --bad: #ff5c5c; --fit: #ffd166; --fit2: #f28482; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+               font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
+  body { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+  header { display: flex; align-items: center; gap: 14px; padding: 10px 18px; background: var(--panel); font-size: 18px; flex-wrap: wrap; }
+  header .title { font-weight: 800; font-size: 24px; letter-spacing: .5px; color: var(--acc); }
+  .cam { padding: 5px 10px; border-radius: 8px; background: var(--card); font-variant-numeric: tabular-nums; }
+  .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 7px; background: var(--bad); vertical-align: middle; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
+  main { display: grid; grid-template-columns: 1fr 440px; min-height: 0; }
+  #plot { min-height: 0; }
+  aside { padding: 14px 18px; background: var(--panel); overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+  .big { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--card); border-radius: 12px; padding: 10px 12px; }
+  .stat .l { color: var(--dim); font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+  .stat .v { font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; white-space: nowrap; }
+  .stat .u { font-size: 18px; color: var(--dim); margin-left: 4px; font-weight: 400; }
+  .stat.g { grid-column: 1 / 3; text-align: center; }
+  .stat.g .v { font-size: 76px; color: var(--acc); }
+  .stat.g .s { font-size: 17px; color: var(--dim); margin-top: 2px; }
+  .stat.g.warn .v { color: var(--warn); }
+  .bounce { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .bounce .stat .v { font-size: 32px; }
+  footer { display: flex; gap: 18px; align-items: center; padding: 8px 18px; background: var(--panel); font-size: 16px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  button { font-size: 16px; padding: 8px 14px; border-radius: 10px; border: 0; background: #2b6cff; color: #fff; cursor: pointer; }
+  button.alt { background: #2a3140; }
+  .throws { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .throws button { padding: 6px 11px; font-size: 14px; background: #2a3140; }
+  .throws button.sel { background: var(--acc); color: #000; font-weight: 700; }
+  h3 { margin: 0; color: var(--dim); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
+  #empty { color: var(--dim); font-size: 20px; padding: 30px 10px; text-align: center; line-height: 1.5; }
+  .warnbox { background: #3a2a14; color: var(--warn); border-radius: 10px; padding: 8px 12px; font-size: 15px; }
+  #noplotly { display: none; padding: 40px; color: var(--warn); font-size: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="title">HawkEye</span>
+  <span id="cams"></span>
+  <span id="baseline" class="cam"></span>
+  <span style="flex:1"></span>
+  <span id="drops" class="cam"></span>
+  <button id="reset" class="alt" title="clear throws (keeps calibration)">Reset</button>
+</header>
+<main>
+  <div id="plot"><div id="noplotly">Plotly did not load (no internet on the hotspot?). Copy plotly.min.js into server/static/ and reload.</div></div>
+  <aside>
+    <div class="throws" id="throws"></div>
+    <div id="panel"></div>
+  </aside>
+</main>
+<footer>
+  <span id="status">connecting…</span>
+  <span id="detail"></span>
+  <span style="flex:1"></span>
+  <span id="clock"></span>
+</footer>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const fmt = (x, d = 2) => (x === null || x === undefined || Number.isNaN(x)) ? '—' : (+x).toFixed(d);
+  let latest = null, selectedId = null, lastKey = '', failures = 0;
+
+  // ---- board frame -> plot frame: x right, depth = z (phones at negative z), height = -y (up = [0,-1,0])
+  const P = p => ({ x: p[0], y: p[2], z: -p[1] });
+
+  function throwById(id) { return (latest.throws || []).find(t => t.id === id) || null; }
+  function currentThrow() {
+    const ts = latest.throws || [];
+    if (!ts.length) return null;
+    if (selectedId !== null) { const t = throwById(selectedId); if (t) return t; }
+    return ts[ts.length - 1];
+  }
+
+  // ---- header / footer
+  function renderHeader() {
+    $('cams').innerHTML = (latest.cameras || []).map(c => {
+      const alive = c.age_s !== null && c.age_s < 3;
+      const cls = !c.locked ? '' : alive ? 'ok' : 'warn';
+      const txt = `${c.device_id} ${c.locked ? (c.nominal ? 'nominal' : 'locked') : 'NOT LOCKED'}` +
+                  (c.fps_reported ? ` · ${Math.round(c.fps_reported)} fps` : '') +
+                  (c.reproj_px !== null && c.reproj_px !== undefined ? ` · ${fmt(c.reproj_px, 1)} px` : '');
+      return `<span class="cam"><span class="dot ${cls}"></span>${txt}</span>`;
+    }).join(' ') || '<span class="cam">no cameras yet</span>';
+    $('baseline').textContent = latest.baseline_m ? `baseline ${fmt(latest.baseline_m)} m` : 'baseline —';
+    const d = latest.drops || {};
+    $('drops').textContent = d.count ? `drops: g = ${fmt(d.g_mean)} ± ${fmt(d.g_std)} (n=${d.count})` : 'drops: none yet';
+    $('clock').textContent = new Date(latest.server_time * 1000).toLocaleTimeString();
+  }
+
+  let buttonsKey = '';
+  function renderThrowButtons() {
+    const ts = latest.throws || [];
+    const cur = currentThrow();
+    const key = JSON.stringify([ts.map(t => [t.id, !!t.bounce]), selectedId]);
+    if (key === buttonsKey) return;       // rebuilding every poll would eat clicks
+    buttonsKey = key;
+    let html = `<button class="${selectedId === null ? 'sel' : ''}" data-id="latest">Latest</button>`;
+    html += ts.slice(-14).map(t => `<button class="${cur && cur.id === t.id && selectedId !== null ? 'sel' : ''}" data-id="${t.id}">${t.bounce ? '↩' : '⤴'} ${t.id}</button>`).join('');
+    $('throws').innerHTML = html;
+    $('throws').querySelectorAll('button').forEach(b => b.onclick = () => {
+      selectedId = b.dataset.id === 'latest' ? null : +b.dataset.id; lastKey = ''; render();
+    });
+  }
+
+  function stat(label, value, unit, extra) {
+    return `<div class="stat"><div class="l">${label}</div><div class="v">${value}<span class="u">${unit || ''}</span></div>${extra || ''}</div>`;
+  }
+
+  function renderPanel() {
+    const t = currentThrow();
+    if (!t) {
+      $('panel').innerHTML = `<div id="empty">Waiting for a throw.<br>Lock both phones, tap Live, and throw.</div>`;
+      $('detail').textContent = '';
+      return;
+    }
+    const segs = t.segments, f1 = segs[0].fit;
+    // the leg with the smallest uncertainty carries the big number
+    const best = segs.reduce((a, s) => (s.fit.g_sigma < a.fit.g_sigma ? s : a), segs[0]).fit;
+    const flight = segs.reduce((a, s) => a + s.fit.flight_time_s, 0);
+    const apex = Math.max(...segs.map(s => s.fit.apex_height_m));
+    const gWarn = Math.abs(best.g_fit - 9.81) > 0.5 || best.g_dir_err_deg > 10;
+    let html = '<div class="big">';
+    html += `<div class="stat g ${gWarn ? 'warn' : ''}"><div class="l">measured gravity</div><div class="v">${fmt(best.g_fit)}<span class="u">m/s²</span></div>` +
+            `<div class="s">± ${fmt(best.g_sigma)} · direction error ${fmt(best.g_dir_err_deg, 1)}°` +
+            (segs.length > 1 ? ` · legs: ${segs.map(s => `${fmt(s.fit.g_fit)} ± ${fmt(s.fit.g_sigma)}`).join(' / ')}` : '') + `</div></div>`;
+    html += stat('release speed', fmt(f1.speed_mps, 1), 'm/s');
+    html += stat('launch angle', fmt(f1.launch_angle_deg, 0), '°');
+    html += stat('apex height', fmt(apex), 'm');
+    html += stat('flight time', fmt(flight), 's');
+    html += '</div>';
+    if (t.bounce) {
+      const b = t.bounce;
+      html += `<h3 style="margin-top:14px">wall bounce</h3><div class="bounce">` +
+              stat('speed in', fmt(b.speed_in_mps, 1), 'm/s') + stat('speed out', fmt(b.speed_out_mps, 1), 'm/s') +
+              stat('restitution', fmt(b.restitution), '') + `</div>`;
+    }
+    if (t.calibration_suspect) html += `<div class="warnbox" style="margin-top:10px">Rays miss each other by ${fmt(t.dt_cost_cm, 1)} cm: re-check Lock / square size.</div>`;
+    $('panel').innerHTML = html;
+    $('detail').textContent = `throw ${t.id} · ${t.n_points} points · Δt ${fmt(t.dt_refined_ms, 0)} ms · ray gap ${fmt(t.tri_resid_cm, 1)} cm · fit rms ${fmt(f1.rms_residual_cm, 1)} cm`;
+  }
+
+  // ---- 3D plot
+  function curve(fit) {
+    const n = 40, xs = [], ys = [], zs = [];
+    for (let i = 0; i <= n; i++) {
+      const tau = fit.flight_time_s * i / n;
+      const p = [0, 1, 2].map(k => fit.p0[k] + fit.v0[k] * tau + 0.5 * fit.a[k] * tau * tau);
+      const q = P(p); xs.push(q.x); ys.push(q.y); zs.push(q.z);
+    }
+    return { xs, ys, zs };
+  }
+
+  function renderPlot() {
+    if (!window.Plotly) { $('noplotly').style.display = 'block'; return; }
+    const cur = currentThrow();
+    const key = JSON.stringify([(latest.throws || []).map(t => [t.id, t.n_points]), cur && cur.id, (latest.cameras || []).map(c => c.position)]);
+    if (key === lastKey) return;
+    lastKey = key;
+    const traces = [];
+    // board
+    const b = latest.board || { cols: 9, rows: 6, square_size_m: 0.028 };
+    const bw = b.cols * b.square_size_m, bh = b.rows * b.square_size_m;
+    const corners = [[0, 0, 0], [bw, 0, 0], [bw, bh, 0], [0, bh, 0], [0, 0, 0]].map(P);
+    traces.push({ type: 'scatter3d', mode: 'lines', x: corners.map(c => c.x), y: corners.map(c => c.y), z: corners.map(c => c.z),
+                  line: { color: '#8b95a7', width: 4 }, name: 'board', hoverinfo: 'name' });
+    // cameras + forward direction
+    (latest.cameras || []).forEach(c => {
+      if (!c.position) return;
+      const p = P(c.position), f = c.forward || [0, 0, 1];
+      const q = P([c.position[0] + 0.5 * f[0], c.position[1] + 0.5 * f[1], c.position[2] + 0.5 * f[2]]);
+      traces.push({ type: 'scatter3d', mode: 'markers+text', x: [p.x], y: [p.y], z: [p.z], text: [c.device_id], textposition: 'top center',
+                    textfont: { color: '#e8ecf2', size: 14 }, marker: { size: 7, color: '#4cc9f0', symbol: 'square' }, name: c.device_id, hoverinfo: 'name' });
+      traces.push({ type: 'scatter3d', mode: 'lines', x: [p.x, q.x], y: [p.y, q.y], z: [p.z, q.z], line: { color: '#4cc9f0', width: 3 }, showlegend: false, hoverinfo: 'skip' });
+    });
+    // other throws, faint
+    (latest.throws || []).forEach(t => {
+      if (cur && t.id === cur.id) return;
+      t.segments.forEach(s => { const c = curve(s.fit);
+        traces.push({ type: 'scatter3d', mode: 'lines', x: c.xs, y: c.ys, z: c.zs, line: { color: 'rgba(255,255,255,0.18)', width: 3 }, showlegend: false, hoverinfo: 'skip' }); });
+    });
+    // selected throw: raw points, fitted legs, impact
+    if (cur) {
+      cur.segments.forEach((s, i) => {
+        const pts = s.points.map(p => P(p));
+        traces.push({ type: 'scatter3d', mode: 'markers', x: pts.map(p => p.x), y: pts.map(p => p.y), z: pts.map(p => p.z),
+                      marker: { size: 3.5, color: '#e8ecf2', opacity: 0.85 }, name: `points ${i + 1}`, showlegend: i === 0, hoverinfo: 'skip' });
+        const c = curve(s.fit);
+        traces.push({ type: 'scatter3d', mode: 'lines', x: c.xs, y: c.ys, z: c.zs, line: { color: i === 0 ? '#ffd166' : '#f28482', width: 7 },
+                      name: `leg ${i + 1}: g ${fmt(s.fit.g_fit)}`, hoverinfo: 'name' });
+      });
+      if (cur.bounce) { const q = P(cur.bounce.point);
+        traces.push({ type: 'scatter3d', mode: 'markers', x: [q.x], y: [q.y], z: [q.z], marker: { size: 9, color: '#ff5c5c', symbol: 'diamond' }, name: 'impact', hoverinfo: 'name' }); }
+    }
+    const ax = { backgroundcolor: '#0b0d12', gridcolor: '#2a3140', zerolinecolor: '#3a4150', color: '#8b95a7', title: { font: { size: 13 } } };
+    const layout = {
+      paper_bgcolor: '#0b0d12', plot_bgcolor: '#0b0d12', margin: { l: 0, r: 0, t: 0, b: 0 },
+      uirevision: 'keep',
+      legend: { font: { color: '#e8ecf2', size: 14 }, bgcolor: 'rgba(0,0,0,0)', x: 0.01, y: 0.99 },
+      scene: { aspectmode: 'data',
+               xaxis: { ...ax, title: { text: 'x (m)' } }, yaxis: { ...ax, title: { text: 'depth (m)' } }, zaxis: { ...ax, title: { text: 'height (m)' } },
+               camera: { eye: { x: 1.4, y: -1.9, z: 0.7 }, up: { x: 0, y: 0, z: 1 } } },
+    };
+    Plotly.react('plot', traces, layout, { displayModeBar: false, responsive: true });
+  }
+
+  function render() { renderHeader(); renderThrowButtons(); renderPanel(); renderPlot(); }
+
+  async function poll() {
+    try {
+      const r = await fetch('/latest', { cache: 'no-store' });
+      latest = await r.json(); failures = 0;
+      $('status').textContent = `session ${latest.session || ''}`;
+      render();
+    } catch (e) {
+      failures++; $('status').textContent = `server not responding (${failures})`;
+    }
+  }
+  $('reset').onclick = async () => { await fetch('/reset', { method: 'POST' }).catch(() => {}); selectedId = null; lastKey = ''; poll(); };
+  document.addEventListener('keydown', e => { if (e.key === 'r' || e.key === 'R') $('reset').onclick(); if (e.key === 'l' || e.key === 'L') { selectedId = null; lastKey = ''; render(); } });
+  window.addEventListener('resize', () => { if (window.Plotly && latest) Plotly.Plots.resize('plot'); });
+  poll(); setInterval(poll, 1000);
+})();
+</script>
+</body>
+</html>

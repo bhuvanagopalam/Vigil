@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>HawkEye capture</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; color: #eee; font: 13px -apple-system, system-ui, sans-serif; }
+  #app { display: flex; flex-direction: row; height: 100%; width: 100%;
+         padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+  #stage { position: relative; flex: 1 1 auto; min-width: 0; background: #111; }
+  video, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  #overlay { pointer-events: none; }
+  #panel { flex: 0 0 290px; display: flex; flex-direction: column; gap: 6px; padding: 8px; overflow-y: auto;
+           -webkit-overflow-scrolling: touch; background: #0a0a0a; border-left: 1px solid #222; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .row > button { flex: 1 1 auto; }
+  button { font-size: 14px; padding: 9px 8px; border-radius: 9px; border: 0; background: #2b6cff; color: #fff; white-space: nowrap; }
+  button.alt { background: #444; } button.warn { background: #c0392b; } button.ok { background: #1e9e5a; }
+  button:disabled { opacity: .4; }
+  input[type=text] { font-size: 14px; padding: 7px; border-radius: 6px; border: 1px solid #555; background: #111; color: #eee; width: 100%; }
+  input[type=range] { flex: 1 1 auto; min-width: 0; }
+  label { color: #aaa; display: flex; align-items: center; gap: 6px; }
+  #stats { font-variant-numeric: tabular-nums; color: #9fd; line-height: 1.3; }
+  #status { color: #ffd166; line-height: 1.3; min-height: 2.6em; }
+  #swatch { display: inline-block; width: 24px; height: 24px; border-radius: 5px; border: 1px solid #777; flex: 0 0 auto; }
+  .val { color: #ccc; min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
+  @media (orientation: portrait) {
+    #app { flex-direction: column; }
+    #stage { flex: 0 0 45vh; }
+    #panel { flex: 1 1 auto; border-left: 0; border-top: 1px solid #222; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <video id="v" playsinline muted autoplay></video>
+    <canvas id="overlay"></canvas>
+  </div>
+  <div id="panel">
+    <div class="row"><button id="start">Start camera</button><button id="sync" class="alt">Sync clock</button></div>
+    <input id="dev" type="text" placeholder="device name, e.g. iphone16">
+    <div id="stats">—</div>
+    <div class="row"><button id="sample" class="alt" disabled>Sample ball</button><span id="swatch"></span></div>
+    <label>tol <input id="tol" type="range" min="0.02" max="0.15" step="0.005"><span id="tolv" class="val"></span></label>
+    <label>minpx <input id="minpx" type="range" min="5" max="150" step="5"><span id="minpxv" class="val"></span></label>
+    <div class="row"><button id="calib" class="alt" disabled>Calib photo (<span id="ncal">0</span>)</button><button id="intr" class="alt" disabled>Intrinsics</button></div>
+    <div class="row"><button id="lock" class="alt" disabled>Lock</button><button id="live" class="ok" disabled>Live: off</button></div>
+    <div class="row"><button id="mask" class="alt" disabled>Mask: off</button><span id="posted" class="val" style="min-width:6em">posted 0</span></div>
+    <div id="status">Hold the phone landscape. Tap Start camera.</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const v = $('v'), ov = $('overlay'), octx = ov.getContext('2d');
+  const A = document.createElement('canvas'); const actx = A.getContext('2d', { willReadFrequently: true });
+  const F = document.createElement('canvas'); const fctx = F.getContext('2d');          // full-res, for JPEGs
+  const AW = 480; let AH = 270, sx = 4, sy = 4;
+  const base = window.location.origin;
+
+  // ---- persisted settings
+  const S = {
+    get dev() { return localStorage.getItem('dev') || ''; }, set dev(x) { localStorage.setItem('dev', x); },
+    get color() { try { return JSON.parse(localStorage.getItem('color')) || null; } catch (e) { return null; } },
+    set color(c) { localStorage.setItem('color', JSON.stringify(c)); },
+    get tol() { return +(localStorage.getItem('tol') || 0.06); }, set tol(x) { localStorage.setItem('tol', x); },
+    get minpx() { return +(localStorage.getItem('minpx') || 25); }, set minpx(x) { localStorage.setItem('minpx', x); },
+  };
+  $('dev').value = S.dev; $('dev').oninput = e => S.dev = e.target.value.trim();
+  $('tol').value = S.tol; $('minpx').value = S.minpx;
+  const showSliders = () => { $('tolv').textContent = S.tol.toFixed(3); $('minpxv').textContent = S.minpx; };
+  $('tol').oninput = e => { S.tol = +e.target.value; showSliders(); };
+  $('minpx').oninput = e => { S.minpx = +e.target.value; showSliders(); };
+  showSliders();
+  let color = S.color; const showSwatch = () => { if (color) $('swatch').style.background = `rgb(${color.R},${color.G},${color.B})`; };
+  showSwatch();
+
+  const status = (m, warn) => { $('status').textContent = m; $('status').style.color = warn ? '#ff6b6b' : '#ffd166'; console.log(m); };
+
+  // ---- clock sync (docs/API.md): min-RTT sample of 30 pings
+  let clockOffset = null, lastRtt = null;
+  async function syncClock() {
+    let best = { rtt: Infinity, off: 0 };
+    for (let i = 0; i < 30; i++) {
+      const t0 = performance.now() / 1000;
+      try {
+        const r = await fetch(base + '/time', { cache: 'no-store' }); const j = await r.json();
+        const t1 = performance.now() / 1000, rtt = t1 - t0;
+        if (rtt < best.rtt) best = { rtt, off: j.server_time - (t0 + rtt / 2) };
+      } catch (e) { /* keep going */ }
+    }
+    if (best.rtt < Infinity) { clockOffset = best.off; lastRtt = best.rtt; status(`clock synced, rtt ${(best.rtt * 1000).toFixed(0)} ms`); }
+    else status('clock sync failed — is the server up at ' + base + ' ?', true);
+  }
+  $('sync').onclick = syncClock;
+  setInterval(() => { if (clockOffset !== null) syncClock(); }, 60000);
+
+  // ---- wake lock
+  let wl = null;
+  async function wake() { try { wl = await navigator.wakeLock.request('screen'); } catch (e) {} }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wake(); });
+
+  // ---- camera
+  let settings = null, fps = 0, frames = 0, lastFpsT = performance.now();
+  $('start').onclick = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } }, audio: false });
+      v.srcObject = stream; await v.play();
+      settings = stream.getVideoTracks()[0].getSettings();
+      AH = Math.round(AW * settings.height / settings.width); A.width = AW; A.height = AH;
+      sx = settings.width / AW; sy = settings.height / AH;
+      F.width = settings.width; F.height = settings.height;
+      ov.width = settings.width; ov.height = settings.height;
+      status(`camera ${settings.width}×${settings.height} @ ${settings.frameRate || '?'} fps`);
+      ['sample', 'calib', 'intr', 'lock', 'live', 'mask'].forEach(id => $(id).disabled = false);
+      $('mask').onclick = () => { maskOn = !maskOn; $('mask').textContent = 'Mask: ' + (maskOn ? 'ON' : 'off'); if (!maskOn) maskImg = null; };
+      $('start').disabled = true;
+      wake(); syncClock(); loop();
+    } catch (e) { status('camera failed: ' + e.message + ' (needs https + permission)', true); }
+  };
+
+  // ---- detection (docs/WEB.md §3): normalized-chroma box around the sampled color
+  let det = null, buffer = [], liveOn = false, maskOn = false, posted = 0, rawN = 0, rejectWhy = '';
+  const M = document.createElement('canvas'); M.width = AW; M.height = AH; const mctx = M.getContext('2d');
+  let maskImg = null;
+  function analyze() {
+    actx.drawImage(v, 0, 0, AW, AH);
+    const px = actx.getImageData(0, 0, AW, AH).data;
+    if (!color) { rejectWhy = 'no color sampled'; return null; }
+    const tol = S.tol, r0 = color.r, g0 = color.g;
+    let n = 0, sX = 0, sY = 0, minX = AW, maxX = 0, minY = AH, maxY = 0;
+    const wantMask = maskOn; if (wantMask && !maskImg) maskImg = mctx.createImageData(AW, AH);
+    const mp = wantMask ? maskImg.data : null;
+    for (let y = 0, i = 0; y < AH; y++) {
+      for (let x = 0; x < AW; x++, i += 4) {
+        const r = px[i], g = px[i + 1], b = px[i + 2], s = r + g + b + 1;
+        let hit = false;
+        if (s >= 120) {
+          const rn = r / s, gn = g / s;
+          hit = rn > r0 - tol && rn < r0 + tol && gn > g0 - tol && gn < g0 + tol;
+        }
+        if (hit) { n++; sX += x; sY += y; if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+        if (mp) { mp[i] = 0; mp[i + 1] = hit ? 255 : 0; mp[i + 2] = 0; mp[i + 3] = hit ? 170 : 0; }
+      }
+    }
+    rawN = n;
+    if (n < S.minpx) { rejectWhy = `n=${n} < minpx`; return null; }
+    const w = (maxX - minX + 1), h = (maxY - minY + 1);
+    if (w > 0.15 * AW || h > 0.15 * AH) { rejectWhy = `blob too big (${w}×${h} of ${AW}×${AH})`; return null; }
+    rejectWhy = '';
+    return { u: (sX / n + 0.5) * sx, v: (sY / n + 0.5) * sy, n, w: w * sx, h: h * sy };
+  }
+  function drawOverlay(d) {
+    octx.clearRect(0, 0, ov.width, ov.height);
+    if (maskOn && maskImg) { mctx.putImageData(maskImg, 0, 0); octx.drawImage(M, 0, 0, ov.width, ov.height); }
+    octx.strokeStyle = '#fff'; octx.lineWidth = 2;
+    const cx = ov.width / 2, cy = ov.height / 2;                 // crosshair
+    octx.beginPath(); octx.moveTo(cx - 30, cy); octx.lineTo(cx + 30, cy); octx.moveTo(cx, cy - 30); octx.lineTo(cx, cy + 30); octx.stroke();
+    if (d) { octx.strokeStyle = '#0f8'; octx.lineWidth = 4; octx.strokeRect(d.u - d.w / 2, d.v - d.h / 2, d.w, d.h); }
+  }
+  let uiT = 0;
+  function onFrame(now, meta) {
+    const t = (meta && typeof meta.captureTime === 'number') ? meta.captureTime / 1000 : now / 1000;
+    det = analyze();
+    if (det && liveOn) buffer.push({ t, u: +det.u.toFixed(1), v: +det.v.toFixed(1), n: det.n, w: Math.round(det.w), h: Math.round(det.h) });
+    frames++;
+    if (now - uiT > 100) {                                      // ~10 Hz UI
+      uiT = now; drawOverlay(det);
+      if (now - lastFpsT > 1000) { fps = Math.round(frames * 1000 / (now - lastFpsT)); frames = 0; lastFpsT = now; }
+      $('stats').textContent = `${settings.width}×${settings.height} ${fps} fps · ` + (det ? `n=${det.n} u=${det.u.toFixed(0)} v=${det.v.toFixed(0)}` : `no ball (${rejectWhy})`) +
+        (clockOffset === null ? ' · clock: —' : ` · rtt ${(lastRtt * 1000).toFixed(0)}ms`);
+      $('posted').textContent = `posted ${posted}`;
+    }
+    loop();
+  }
+  function loop() {
+    if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(onFrame);
+    else requestAnimationFrame(now => onFrame(now, null));
+  }
+
+  $('sample').onclick = () => {                                 // average a 9×9 patch at the center
+    actx.drawImage(v, 0, 0, AW, AH);
+    const p = actx.getImageData(AW / 2 - 4, AH / 2 - 4, 9, 9).data;
+    let R = 0, G = 0, B = 0; for (let i = 0; i < p.length; i += 4) { R += p[i]; G += p[i + 1]; B += p[i + 2]; }
+    R /= 81; G /= 81; B /= 81; const s = R + G + B + 1;
+    color = { r: R / s, g: G / s, R: Math.round(R), G: Math.round(G), B: Math.round(B) }; S.color = color; showSwatch();
+    status(`sampled ball color r'=${color.r.toFixed(3)} g'=${color.g.toFixed(3)}`);
+  };
+
+  // ---- POST detections every 500 ms while live (empty batches too)
+  setInterval(() => {
+    if (!liveOn || clockOffset === null) return;
+    const frames = buffer; buffer = []; posted += frames.length;
+    fetch(base + '/detections', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: S.dev || 'unknown', clock_offset: clockOffset, image_size: [settings.width, settings.height],
+        fps_reported: settings.frameRate || null, frames }) }).catch(() => {});
+  }, 500);
+  $('live').onclick = () => {
+    if (!color) return status('sample the ball first', true);
+    if (clockOffset === null) return status('clock not synced — tap Sync clock', true);
+    liveOn = !liveOn; $('live').textContent = 'Live: ' + (liveOn ? 'ON' : 'off'); $('live').className = liveOn ? 'warn' : 'ok';
+    status(liveOn ? 'LIVE — do not touch the phone' : 'live off');
+  };
+
+  // ---- calibration uploads (docs/API.md): full-res JPEG via multipart
+  function fullJpeg() {
+    return new Promise(res => { fctx.drawImage(v, 0, 0, F.width, F.height); F.toBlob(res, 'image/jpeg', 0.92); });
+  }
+  async function upload(path, blob) {
+    const fd = new FormData(); fd.append('device_id', S.dev || 'unknown'); fd.append('image_size', `${settings.width}x${settings.height}`);
+    fd.append('image', blob, 'frame.jpg');
+    const r = await fetch(base + path, { method: 'POST', body: fd }); return r.json();
+  }
+  let ncal = 0;
+  $('calib').onclick = async () => {
+    try { const j = await upload('/calib_image', await fullJpeg()); ncal = j.count ?? (ncal + 1); $('ncal').textContent = ncal;
+      status(`calib photo ${ncal}: corners ${j.corners_found === null ? '(stub)' : j.corners_found ? 'found' : 'NOT found — retake'}`, j.corners_found === false);
+    } catch (e) { status('calib upload failed: ' + e.message, true); }
+  };
+  $('intr').onclick = async () => {
+    try { const r = await fetch(base + '/intrinsics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device_id: S.dev }) });
+      const j = await r.json(); status(j.ok ? `intrinsics ok: rms ${j.rms_px} px over ${j.n_images} images` : 'intrinsics: ' + (j.message || 'failed'), !j.ok);
+    } catch (e) { status('intrinsics request failed: ' + e.message, true); }
+  };
+  $('lock').onclick = async () => {
+    for (let s = 3; s > 0; s--) { status(`locking in ${s}… hands off the phone`); await new Promise(r => setTimeout(r, 1000)); }
+    try { const j = await upload('/lock', await fullJpeg());
+      if (!j.ok) return status('lock failed: ' + (j.message || 'board not found?'), true);
+      const p = j.camera_position || []; status(`LOCKED at (${p.map(x => (+x).toFixed(2)).join(', ')})` + (j.baseline_m ? ` · baseline ${(+j.baseline_m).toFixed(2)} m` : '') + (j.stub ? ' (stub)' : '') + ' — DO NOT MOVE THE PHONE');
+    } catch (e) { status('lock upload failed: ' + e.message, true); }
+  };
+})();
+</script>
+</body>
+</html>

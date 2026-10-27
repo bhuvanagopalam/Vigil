@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>breath test</title>
+<style>
+  :root { color-scheme: dark; } * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; color: #eee; font: 14px -apple-system, system-ui, sans-serif; }
+  #app { display: flex; flex-direction: column; height: 100%; }
+  #stage { position: relative; flex: 1 1 auto; min-height: 0; background: #111; }
+  video, #ov { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  #ov { pointer-events: none; }
+  #wave { width: 100%; height: 110px; background: #0a0a0a; display: block; }
+  #bar { padding: 8px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { font-size: 15px; padding: 10px 12px; border-radius: 9px; border: 0; background: #2b6cff; color: #fff; }
+  button.alt { background: #444; } button.on { background: #c0392b; }
+  #rr { font-size: 28px; font-weight: 700; color: #9fd; min-width: 7em; }
+  #s { color: #ffd166; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage"><video id="v" playsinline muted autoplay></video><canvas id="ov"></canvas></div>
+  <canvas id="wave"></canvas>
+  <div id="bar">
+    <button id="front">Start (front)</button><button id="rear" class="alt">Start (rear)</button>
+    <button id="ref" class="alt" disabled>Reset reference</button>
+    <button id="send" class="alt" disabled>Send: off</button>
+    <input id="dev" placeholder="device" style="font-size:14px;padding:8px;border-radius:6px;border:1px solid #555;background:#111;color:#eee;width:90px">
+    <span id="rr">— /min</span><span id="s">Tap the video on the chest to place the box. Sit still, 1–1.5 m away.</span>
+  </div>
+</div>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const v = $('v'), ov = $('ov'), octx = ov.getContext('2d'), wave = $('wave'), wctx = wave.getContext('2d');
+  const RW = 192, RH = 320;                       // ROI analysis size (tall: we track vertical motion)
+  const R = document.createElement('canvas'); R.width = RW; R.height = RH; const rctx = R.getContext('2d', { willReadFrequently: true });
+  const base = location.origin;
+  let stream = null, roi = { cx: 0.5, cy: 0.62, w: 0.36, h: 0.42 }, refProfile = null, sending = false, buf = [];
+  let sig = [], times = [], fpsN = 0, fpsT = performance.now(), fps = 0, lastDy = 0;
+  $('dev').value = localStorage.getItem('dev') || ''; $('dev').oninput = e => localStorage.setItem('dev', e.target.value.trim());
+  const st = m => { $('s').textContent = m; };
+
+  async function start(front) {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: front ? 'user' : 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: false });
+    v.srcObject = stream; await v.play();
+    const se = stream.getVideoTracks()[0].getSettings();
+    ov.width = se.width; ov.height = se.height; refProfile = null; sig = []; times = [];
+    $('ref').disabled = false; $('send').disabled = false;
+    try { await navigator.wakeLock.request('screen'); } catch (e) {}
+    st(`camera ${se.width}×${se.height} @ ${se.frameRate || '?'} — tap the chest to place the box`);
+    loop();
+  }
+  $('front').onclick = () => start(true); $('rear').onclick = () => start(false);
+  $('ref').onclick = () => { hist.length = 0; disp = 0; sig = []; times = []; };
+  $('send').onclick = () => { sending = !sending; $('send').textContent = 'Send: ' + (sending ? 'ON' : 'off'); $('send').className = sending ? 'on' : 'alt'; };
+  // tap to move the ROI (map from the contained video box to frame coords)
+  $('stage').addEventListener('pointerdown', e => {
+    const r = v.getBoundingClientRect(); const vw = v.videoWidth, vh = v.videoHeight; if (!vw) return;
+    const s = Math.min(r.width / vw, r.height / vh), dw = vw * s, dh = vh * s, ox = r.left + (r.width - dw) / 2, oy = r.top + (r.height - dh) / 2;
+    roi.cx = Math.min(1 - roi.w / 2, Math.max(roi.w / 2, (e.clientX - ox) / dw)); roi.cy = Math.min(1 - roi.h / 2, Math.max(roi.h / 2, (e.clientY - oy) / dh));
+    hist.length = 0; disp = 0; sig = []; times = [];
+  });
+
+  // vertical row-intensity profile of the ROI; vertical shift vs. a reference profile = chest displacement (px of ROI canvas)
+  function profile() {
+    const vw = v.videoWidth, vh = v.videoHeight;
+    const sx = (roi.cx - roi.w / 2) * vw, sy = (roi.cy - roi.h / 2) * vh;
+    rctx.drawImage(v, sx, sy, roi.w * vw, roi.h * vh, 0, 0, RW, RH);
+    const px = rctx.getImageData(0, 0, RW, RH).data; const p = new Float32Array(RH);
+    for (let y = 0, i = 0; y < RH; y++) { let acc = 0; for (let x = 0; x < RW; x++, i += 4) acc += px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114; p[y] = acc / RW; }
+    // remove mean brightness so exposure changes don't look like motion
+    let m = 0; for (let y = 0; y < RH; y++) m += p[y]; m /= RH; for (let y = 0; y < RH; y++) p[y] -= m;
+    return p;
+  }
+  function shift(p, ref, S) {                 // best integer shift in [-S, S] minimizing SSD, then parabolic sub-pixel; null if at the limit
+    let best = 0, bestE = Infinity; const E = new Float32Array(2 * S + 1); const n = p.length;
+    for (let s = -S; s <= S; s++) { let e = 0, c = 0; for (let y = S; y < n - S; y++) { const d = p[y] - ref[y + s]; e += d * d; c++; } E[s + S] = e / c; if (e / c < bestE) { bestE = e / c; best = s; } }
+    if (best <= -S || best >= S) return null;
+    const a = E[best + S - 1], b = E[best + S], c = E[best + S + 1]; const den = a - 2 * b + c; const sub = den > 1e-9 ? 0.5 * (a - c) / den : 0;
+    return best + sub;
+  }
+  // horizontal profile (column means) to detect sideways sway, which we reject rather than mistake for breathing
+  function hprofile() {
+    const px = rctx.getImageData(0, 0, RW, RH).data; const q = new Float32Array(RW);
+    for (let x = 0; x < RW; x++) { let acc = 0; for (let y = 0; y < RH; y++) { const i = (y * RW + x) * 4; acc += px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114; } q[x] = acc / RH; }
+    let m = 0; for (let x = 0; x < RW; x++) m += q[x]; m /= RW; for (let x = 0; x < RW; x++) q[x] -= m; return q;
+  }
+  const hist = [];                            // ring of {p, q, t} for the last ~1 s
+  let disp = 0;                               // leaky-integrated displacement for display
+  function estimateRR() {                     // FFT-free: autocorrelation-ish via spectrum on last 24 s
+    const n = sig.length; if (n < 60) return null;
+    const dur = times[n - 1] - times[0]; const fs = n / dur;
+    const win = Math.min(n, Math.round(24 * fs)); const x = sig.slice(n - win); const t = times.slice(n - win);
+    // detrend (remove linear) then bandpass 0.1–0.7 Hz by brute-force DFT over candidate rates
+    const mean = x.reduce((a, b) => a + b, 0) / win; let bestP = 0, bestF = 0, tot = 0, cnt = 0;
+    for (let f = 0.1; f <= 0.7; f += 0.01) { let re = 0, im = 0; for (let i = 0; i < win; i++) { const ph = 2 * Math.PI * f * (t[i] - t[0]); re += (x[i] - mean) * Math.cos(ph); im += (x[i] - mean) * Math.sin(ph); } const P = re * re + im * im; tot += P; cnt++; if (P > bestP) { bestP = P; bestF = f; } }
+    return { rr: bestF * 60, snr: bestP / (tot / cnt), fs };
+  }
+  function drawWave() {
+    const W = wave.width = wave.clientWidth * devicePixelRatio, H = wave.height = 110 * devicePixelRatio;
+    wctx.fillStyle = '#0a0a0a'; wctx.fillRect(0, 0, W, H); const n = sig.length; if (n < 2) return;
+    const win = Math.min(n, 600); const x = sig.slice(n - win); let lo = Math.min(...x), hi = Math.max(...x); if (hi - lo < 1) { const m = (hi + lo) / 2; lo = m - 0.5; hi = m + 0.5; }
+    wctx.strokeStyle = '#4ade80'; wctx.lineWidth = 2 * devicePixelRatio; wctx.beginPath();
+    for (let i = 0; i < win; i++) { const X = i / (win - 1) * W, Y = H - 8 - (x[i] - lo) / (hi - lo) * (H - 16); i ? wctx.lineTo(X, Y) : wctx.moveTo(X, Y); }
+    wctx.stroke(); wctx.fillStyle = '#888'; wctx.font = `${12 * devicePixelRatio}px system-ui`; wctx.fillText(`chest displacement, last ${(times[n-1]-times[Math.max(0,n-win)]).toFixed(0)} s  (range ${(hi-lo).toFixed(1)} px)`, 8 * devicePixelRatio, 14 * devicePixelRatio);
+  }
+  let uiT = 0;
+  function frame(now, meta) {
+    const p = profile(); const q = hprofile(); const t = now / 1000;
+    hist.push({ p, q, t }); while (hist.length > 2 && hist[0].t < t - 0.6) hist.shift();
+    // reference = the frame ~0.5 s ago (velocity-like estimate; cannot drift or saturate)
+    let ref = null; for (const h of hist) { if (h.t <= t - 0.4) ref = h; }
+    let dy = 0, ok = false;
+    if (ref) {
+      const vy = shift(p, ref.p, 8), vx = shift(q, ref.q, 8);
+      ok = vy !== null && vx !== null && Math.abs(vx) < 2.5;     // reject sideways sway / lost lock
+      dy = ok ? vy : 0;
+    }
+    disp = 0.97 * disp + dy;                     // leaky integral -> looks like displacement, forgets drift
+    lastDy = dy;
+    sig.push(disp); times.push(t); if (sig.length > 3000) { sig.shift(); times.shift(); }
+    buf.push([+t.toFixed(3), +disp.toFixed(3), +dy.toFixed(3), ok ? 1 : 0]);
+    fpsN++; if (now - fpsT > 1000) { fps = fpsN; fpsN = 0; fpsT = now; }
+    if (now - uiT > 100) {
+      uiT = now; octx.clearRect(0, 0, ov.width, ov.height); octx.strokeStyle = '#0f8'; octx.lineWidth = 4;
+      octx.strokeRect((roi.cx - roi.w / 2) * ov.width, (roi.cy - roi.h / 2) * ov.height, roi.w * ov.width, roi.h * ov.height);
+      drawWave(); const e = estimateRR();
+      $('rr').textContent = e ? `${e.rr.toFixed(0)} /min` : '— /min';
+      st(`${fps} fps · v ${dy.toFixed(2)} px/0.5s ${ok ? '' : '(rejected)'}` + (e ? ` · snr ${e.snr.toFixed(1)} · ${(times[times.length-1]-times[0]).toFixed(0)} s` : ' · collecting…') + (sending ? ' · SENDING' : ''));
+    }
+    loop();
+  }
+  function loop() { if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(frame); else requestAnimationFrame(n => frame(n, null)); }
+  setInterval(() => {
+    if (!sending || !buf.length) return; const frames = buf; buf = [];
+    fetch(base + '/breath', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: $('dev').value || 'unknown', roi, frames }) }).catch(() => {});
+  }, 500);
+})();
+</script>
+</body>
+</html>

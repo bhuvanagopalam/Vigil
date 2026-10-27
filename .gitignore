@@ -1,0 +1,23 @@
+# python
+server/.venv/
+__pycache__/
+*.pyc
+
+# keep small real sessions committed on purpose; ignore big ones by hand
+server/data/*/videos/
+
+# xcode
+ios/**/xcuserdata/
+ios/**/DerivedData/
+ios/**/*.xcuserstate
+.DS_Store
+server/data/dev/
+server/data/dev_server.log
+
+# server: live calibration mirror (per-machine)
+server/data/calibration_latest.json
+
+# live sessions and logs stay local; server/data/samples/ is committed
+server/data/2*/
+server/data/*.log
+server/data/pptx_build/

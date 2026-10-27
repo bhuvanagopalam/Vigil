@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Vigil</title>
+<style>
+  :root { color-scheme: dark; } * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: #0b0f14; color: #e8eef5; font: 17px -apple-system, system-ui, sans-serif; }
+  .screen { display: none; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); max-width: 520px; margin: 0 auto; }
+  .screen.active { display: block; }
+  h1 { font-size: 26px; margin: 8px 0 4px; } h2 { font-size: 20px; margin: 16px 0 8px; } p { color: #aab6c3; line-height: 1.4; }
+  label { display: block; color: #aab6c3; margin: 14px 0 6px; font-size: 15px; }
+  input, textarea { width: 100%; font-size: 17px; padding: 12px; border-radius: 10px; border: 1px solid #2a3542; background: #121923; color: #e8eef5; }
+  textarea { min-height: 80px; }
+  button { width: 100%; font-size: 18px; padding: 15px; border-radius: 12px; border: 0; background: #2b6cff; color: #fff; margin-top: 16px; }
+  button.alt { background: #223041; } button:disabled { opacity: .45; }
+  .big { font-size: 64px; font-weight: 700; text-align: center; margin: 10px 0; font-variant-numeric: tabular-nums; }
+  .sub { text-align: center; color: #aab6c3; }
+  #stage { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 12px; overflow: hidden; margin-top: 8px; }
+  video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  canvas.wave { width: 100%; height: 90px; background: #121923; border-radius: 10px; display: block; margin-top: 10px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  .card { background: #121923; border-radius: 12px; padding: 12px; }
+  .card .v { font-size: 30px; font-weight: 700; } .card .k { color: #aab6c3; font-size: 14px; }
+  .warn { color: #ffb84d; } .bad { color: #ff6b6b; } .good { color: #4ade80; }
+  #glow { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; font-size: 40px; font-weight: 800; color: #000; }
+  .range { display: flex; align-items: center; gap: 10px; } .range input { flex: 1; } .range span { width: 2.2em; text-align: right; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="glow"></div>
+<div id="seatbox" style="display:none; padding: 12px 20px 0;">
+  <div class="seatrow"><label for="seat">Chair number</label><input id="seat" inputmode="numeric" pattern="[0-9]*" placeholder="on the chair"><button id="seat-save" class="alt">Save</button></div>
+  <div class="sub" id="seat-msg">The room camera watches breathing at your chair.</div>
+</div>
+
+<section id="s-join" class="screen active">
+  <h1>Vigil</h1>
+  <p>You're in the waiting room. Your phone will keep an eye on you while you wait, and the nurse will see if anything changes. Takes 30 seconds, every 15 minutes.</p>
+  <label>Your name or initials</label><input id="name" autocomplete="off">
+  <label>Age</label><input id="age" type="number" inputmode="numeric">
+  <label>Chair number (on the chair)</label><input id="chair" type="number" inputmode="numeric" autocomplete="off">
+  <label>What brings you in today?</label><textarea id="complaint" placeholder="e.g. chest pain since this morning, short of breath"></textarea>
+  <label>Pain right now (0–10)</label><div class="range"><input id="pain" type="range" min="0" max="10" value="3"><span id="painv">3</span></div>
+  <button id="join">Start</button>
+</section>
+
+<section id="s-measure" class="screen">
+  <h1 id="m-title">Pulse check</h1>
+  <p id="m-help">Cover the <b>rear camera lens</b> completely with your fingertip. The flash will turn on and your finger will glow red. Keep still.</p>
+  <div id="stage"><video id="v" playsinline muted autoplay></video></div>
+  <canvas id="w1" class="wave"></canvas>
+  <div class="big" id="count">—</div>
+  <div class="sub" id="m-status">waiting for a steady signal…</div>
+  <button id="m-start">Flash on, I'm ready</button>
+</section>
+
+<section id="s-result" class="screen">
+  <h1>Recorded</h1>
+  <p id="r-msg">The nurse can see this. We'll ask you to check again in 15 minutes — keep this page open.</p>
+  <div class="grid">
+    <div class="card"><div class="v" id="r-hr">—</div><div class="k">heart rate, bpm</div></div>
+    <div class="card"><div class="v" id="r-rr">—</div><div class="k">breaths / min</div></div>
+    <div class="card"><div class="v" id="r-hrv">—</div><div class="k">HRV (RMSSD), ms</div></div>
+    <div class="card"><div class="v" id="r-crt">—</div><div class="k">capillary refill, s</div></div>
+  </div>
+  <canvas id="w2" class="wave"></canvas>
+  <div class="big" id="next">15:00</div>
+  <div class="sub">until your next check</div>
+  <button id="again" class="alt">Check again now</button>
+</section>
+<style>
+  .seatrow { display: flex; gap: 10px; align-items: center; margin: 4px 0 6px; }
+  .seatrow label { flex: 1; }
+  .seatrow input { font: inherit; font-size: 22px; width: 5.5em; padding: 10px 12px; border-radius: 10px; border: 1px solid #8a8f98; background: transparent; color: inherit; }
+  .seatrow button { margin: 0; width: auto; }
+</style>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const base = location.origin;
+  const show = id => { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); $(id).classList.add('active'); $('seatbox').style.display = id === 's-join' ? 'none' : 'block'; };
+  let pid = localStorage.getItem('pid');
+  $('seat-save').onclick = async () => {
+    if (!pid) return; const v = $('seat').value.trim();
+    try { const j = await (await fetch(base + '/seat/' + pid, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seat: v || null }) })).json();
+      $('seat-msg').textContent = j.seat ? `Saved: ${j.seat}. The room camera now watches your breathing there.` : 'Chair cleared.'; } catch (e) { $('seat-msg').textContent = 'Could not save, try again.'; }
+  };
+  $('pain').oninput = e => $('painv').textContent = e.target.value;
+  const st = (m, cls) => { $('m-status').textContent = m; $('m-status').className = 'sub ' + (cls || ''); };
+
+  // ---------- join
+  $('join').onclick = async () => {
+    const body = { name: $('name').value.trim() || 'anon', age: +$('age').value || null, complaint: $('complaint').value.trim(), pain: +$('pain').value, seat: $('chair').value.trim() || null };
+    if (!body.name) return;
+    const r = await fetch(base + '/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json(); pid = j.id; localStorage.setItem('pid', pid);
+    if (j.seat) { $('seat').value = j.seat.replace(/\D/g, ''); $('seat-msg').textContent = `${j.seat}: the room camera watches your breathing there.`; }
+    show('s-measure');
+  };
+
+  // ---------- camera + PPG capture
+  const v = $('v'); const A = document.createElement('canvas'); A.width = 64; A.height = 48; const actx = A.getContext('2d', { willReadFrequently: true });
+  let stream = null, phase = 'idle', frames = [], crtFrames = [], crtRelease = null, t0 = 0, wave = [];
+  async function openCamera() {
+    if (stream) return;
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 120 } }, audio: false });
+    v.srcObject = stream; await v.play();
+    try { await stream.getVideoTracks()[0].applyConstraints({ advanced: [{ torch: true }] }); } catch (e) { st('flash not available — hold your finger near a bright light instead', 'warn'); }
+    try { await navigator.wakeLock.request('screen'); } catch (e) {}
+    loop();
+  }
+  function sample() {
+    actx.drawImage(v, 0, 0, 64, 48); const px = actx.getImageData(0, 0, 64, 48).data; let r = 0, g = 0, b = 0;
+    for (let i = 0; i < px.length; i += 4) { r += px[i]; g += px[i + 1]; b += px[i + 2]; } const n = px.length / 4;
+    return [r / n, g / n, b / n];
+  }
+  const PPG_S = 20, PRESS_S = 4, RELAX_S = 6;   // 20 s pulse (HR exact, breathing ±3/min), 10 s refill test
+  function drawWave(c, data) {
+    const W = c.width = c.clientWidth * devicePixelRatio, H = c.height = 90 * devicePixelRatio, ctx = c.getContext('2d');
+    ctx.fillStyle = '#121923'; ctx.fillRect(0, 0, W, H); if (data.length < 3) return;
+    const lo = Math.min(...data), hi = Math.max(...data); ctx.strokeStyle = '#ff6b6b'; ctx.lineWidth = 2 * devicePixelRatio; ctx.beginPath();
+    data.forEach((y, i) => { const X = i / (data.length - 1) * W, Y = H - 6 - (y - lo) / (hi - lo + 1e-9) * (H - 12); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+    ctx.stroke();
+  }
+  let ui = 0, hpBuf = [];
+  function frame(now, meta) {
+    const t = ((meta && typeof meta.captureTime === 'number') ? meta.captureTime : now) / 1000;
+    const [r, g, b] = sample();
+    if (phase === 'ppg') frames.push([+t.toFixed(4), +r.toFixed(2), +g.toFixed(2), +b.toFixed(2)]);
+    if (phase === 'press' || phase === 'relax') crtFrames.push([+t.toFixed(4), +r.toFixed(2), +g.toFixed(2), +b.toFixed(2)]);
+    // live waveform: inverted red, high-passed by a running mean
+    hpBuf.push(-r); if (hpBuf.length > 240) hpBuf.shift();
+    if (now - ui > 66) {
+      ui = now; const m = hpBuf.reduce((a, c) => a + c, 0) / hpBuf.length; wave = hpBuf.map(x => x - m); drawWave($('w1'), wave);
+      const el = (now - t0) / 1000;
+      if (phase === 'ppg') { $('count').textContent = Math.max(0, Math.ceil(PPG_S - el)); st(r > 120 && g < 60 ? 'good — keep still' : 'cover the lens fully with your fingertip', r > 120 && g < 60 ? 'good' : 'warn'); if (el >= PPG_S) startCRT(); }
+      else if (phase === 'press') { $('count').textContent = Math.max(0, Math.ceil(PRESS_S - el)); if (el >= PRESS_S) { phase = 'relax'; crtRelease = t; t0 = now; $('m-title').textContent = 'Now relax your finger'; st('relax the pressure but keep the finger on the lens', 'warn'); } }
+      else if (phase === 'relax') { $('count').textContent = Math.max(0, Math.ceil(RELAX_S - el)); if (el >= RELAX_S) finish(); }
+      else if (phase === 'idle') { st(r > 120 && g < 60 ? 'signal looks good — tap the button' : 'cover the lens fully with your fingertip', r > 120 && g < 60 ? 'good' : ''); }
+    }
+    loop();
+  }
+  function loop() { if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(frame); else requestAnimationFrame(n => frame(n, null)); }
+
+  $('m-start').onclick = async () => {
+    if (!stream) { await openCamera(); $('m-start').textContent = 'Start the 20-second check'; return; }
+    frames = []; crtFrames = []; crtRelease = null; phase = 'ppg'; t0 = performance.now(); $('m-start').disabled = true;
+    $('m-title').textContent = 'Pulse check'; $('m-help').textContent = 'Keep still. Breathe normally.';
+  };
+  function startCRT() {
+    phase = 'press'; t0 = performance.now(); $('m-title').textContent = 'Press hard on the lens'; $('m-help').textContent = 'Press your fingertip hard against the lens for 4 seconds — this is the "capillary refill" test nurses do by pressing your fingernail.';
+    st('press hard now', 'warn');
+  }
+  async function finish() {
+    phase = 'done'; $('count').textContent = '…'; st('analysing…');
+    try {
+      const r = await fetch(base + '/measure', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: pid, frames, crt_frames: crtFrames, crt_release_t: crtRelease }) });
+      const j = await r.json(); showResult(j);
+    } catch (e) { st('upload failed: ' + e.message, 'bad'); $('m-start').disabled = false; phase = 'idle'; }
+  }
+  function showResult(j) {
+    const R = j.result || {}; const C = j.crt || {};
+    $('r-hr').textContent = R.hr ?? '—'; $('r-rr').textContent = R.rr ?? '—'; $('r-hrv').textContent = R.rmssd_ms ?? '—';
+    $('r-crt').textContent = C && C.ok ? C.crt_s : '—';
+    $('r-msg').textContent = R.ok ? 'The nurse can see this. We\'ll ask you to check again in 15 minutes — keep this page open.' : ('Reading was unclear (' + (R.reason || 'weak signal') + '). Please check again.');
+    if (R.wave) drawWave($('w2'), R.wave);
+    phase = 'idle'; $('m-start').disabled = false; $('m-start').textContent = 'Start the 20-second check'; $('m-title').textContent = 'Pulse check';
+    nextDue = Date.now() + 15 * 60 * 1000; show('s-result');
+  }
+  $('again').onclick = () => show('s-measure');
+
+  // ---------- waiting: countdown, recheck requests, glow
+  let nextDue = 0;
+  setInterval(async () => {
+    if (nextDue) { const s = Math.max(0, Math.round((nextDue - Date.now()) / 1000)); $('next').textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; if (s === 0 && $('s-result').classList.contains('active')) { nextDue = 0; alert('Time for your 30-second check.'); show('s-measure'); } }
+    if (!pid) return;
+    try {
+      const j = await (await fetch(base + '/me/' + pid, { cache: 'no-store' })).json();
+      if (!j.ok) { localStorage.removeItem('pid'); pid = null; show('s-join'); return; }
+      if (j.seat && document.activeElement !== $('seat')) { if (!$('seat').value) $('seat').value = j.seat.replace(/\D/g, ''); if (j.live) $('seat-msg').textContent = j.live.apnea ? `${j.seat}: the camera sees no breathing movement.` : `${j.seat}: the camera sees you breathing at ${j.live.rr != null ? Math.round(j.live.rr) : '–'}/min.`; }
+      const g = $('glow'); if (j.glow) { g.style.background = j.glow; g.style.display = 'flex'; g.textContent = j.name + ' — the nurse is looking for you'; } else g.style.display = 'none';
+      if (j.recheck_requested && !$('s-measure').classList.contains('active')) { nextDue = 0; alert('The nurse asked for a quick re-check.'); show('s-measure'); }
+    } catch (e) {}
+  }, 3000);
+  if (pid) { fetch(base + '/me/' + pid).then(r => r.ok ? show('s-measure') : (localStorage.removeItem('pid'), pid = null)); }
+})();
+</script>
+</body>
+</html>

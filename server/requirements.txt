@@ -1,0 +1,9 @@
+fastapi>=0.100,<1
+uvicorn[standard]>=0.23,<1
+python-multipart>=0.0.6
+numpy>=1.24,<2.1
+scipy>=1.10,<1.14
+opencv-python-headless>=4.8,<5
+qrcode[pil]>=7
+
+# only for model/train.py (offline): scikit-learn<1.6

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Vigil — room camera</title>
+<style>
+  :root { color-scheme: dark; } * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; color: #eee; font: 14px -apple-system, system-ui, sans-serif; }
+  #app { display: flex; flex-direction: column; height: 100%; }
+  #stage { position: relative; flex: 1 1 auto; min-height: 0; background: #111; }
+  video, #ov { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  #ov { pointer-events: none; }
+  #bar { padding: 8px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { font-size: 15px; padding: 10px 12px; border-radius: 9px; border: 0; background: #2b6cff; color: #fff; }
+  button.alt { background: #444; }
+  #s { color: #ffd166; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage"><video id="v" playsinline muted autoplay></video><canvas id="ov"></canvas></div>
+  <div id="bar">
+    <button id="front">Start (front)</button><button id="rear" class="alt">Start (rear)</button>
+    <button id="clear" class="alt">Clear seats</button>
+    <span id="s">Start the camera, then tap each person's chest to add a seat (tap a box to remove it).</span>
+  </div>
+</div>
+<script>
+(() => {
+  // Contactless breathing per seat: vertical motion of the chest region, tracked as the sub-pixel shift of the
+  // region's row-intensity profile against the frame ~0.5 s earlier (cannot drift or saturate), sideways sway
+  // rejected, leaky-integrated, rate = spectral peak 0.1–0.7 Hz over the last 24 s. Same method as breath_test.html.
+  const $ = id => document.getElementById(id);
+  const v = $('v'), ov = $('ov'), octx = ov.getContext('2d');
+  const RW = 128, RH = 192, BW = 0.18, BH = 0.26, MAX = 6;
+  const base = location.origin;
+  let stream = null, seats = [], fps = 0, fpsN = 0, fpsT = performance.now();
+  const st = m => { $('s').textContent = m; };
+
+  function mkSeat(cx, cy, label) {
+    const c = document.createElement('canvas'); c.width = RW; c.height = RH;
+    return { label, cx, cy, ctx: c.getContext('2d', { willReadFrequently: true }), hist: [], disp: 0, sig: [], times: [], rr: null, snr: 0, amp: 0, apnea: 0 };
+  }
+  async function start(front) {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: front ? 'user' : 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: false });
+    v.srcObject = stream; await v.play(); const se = stream.getVideoTracks()[0].getSettings(); ov.width = se.width; ov.height = se.height;
+    try { await navigator.wakeLock.request('screen'); } catch (e) {}
+    st(`camera ${se.width}×${se.height} — tap each person's chest`); loop();
+  }
+  $('front').onclick = () => start(true); $('rear').onclick = () => start(false);
+  $('clear').onclick = () => { seats = []; };
+  $('stage').addEventListener('pointerdown', e => {
+    const r = v.getBoundingClientRect(); const vw = v.videoWidth, vh = v.videoHeight; if (!vw) return;
+    const s = Math.min(r.width / vw, r.height / vh), dw = vw * s, dh = vh * s, ox = r.left + (r.width - dw) / 2, oy = r.top + (r.height - dh) / 2;
+    const x = (e.clientX - ox) / dw, y = (e.clientY - oy) / dh; if (x < 0 || x > 1 || y < 0 || y > 1) return;
+    const hit = seats.findIndex(q => Math.abs(q.cx - x) < BW / 2 && Math.abs(q.cy - y) < BH / 2);
+    if (hit >= 0) { seats.splice(hit, 1); return; }
+    if (seats.length >= MAX) return;
+    // the chair number written on the chair: the same number the patient types at check-in
+    const used = seats.map(q => +q.label.replace(/\D/g, '')).filter(n => n > 0);
+    const guess = used.length ? Math.max(...used) + 1 : 1;
+    const n = prompt('Chair number on this chair?', guess); if (n === null) return;
+    const num = parseInt(n, 10); if (!num) return;
+    seats = seats.filter(q => q.label !== 'seat ' + num);
+    seats.push(mkSeat(Math.min(1 - BW / 2, Math.max(BW / 2, x)), Math.min(1 - BH / 2, Math.max(BH / 2, y)), 'seat ' + num));
+  });
+
+  function profiles(seat) {
+    const vw = v.videoWidth, vh = v.videoHeight;
+    seat.ctx.drawImage(v, (seat.cx - BW / 2) * vw, (seat.cy - BH / 2) * vh, BW * vw, BH * vh, 0, 0, RW, RH);
+    const px = seat.ctx.getImageData(0, 0, RW, RH).data; const p = new Float32Array(RH), q = new Float32Array(RW);
+    for (let y = 0, i = 0; y < RH; y++) for (let x = 0; x < RW; x++, i += 4) { const g = px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114; p[y] += g; q[x] += g; }
+    let mp = 0, mq = 0; for (let y = 0; y < RH; y++) { p[y] /= RW; mp += p[y]; } for (let x = 0; x < RW; x++) { q[x] /= RH; mq += q[x]; }
+    mp /= RH; mq /= RW; for (let y = 0; y < RH; y++) p[y] -= mp; for (let x = 0; x < RW; x++) q[x] -= mq;
+    return { p, q };
+  }
+  function shift(p, ref, S) {
+    let best = 0, bestE = Infinity; const E = new Float32Array(2 * S + 1); const n = p.length;
+    for (let s = -S; s <= S; s++) { let e = 0, c = 0; for (let y = S; y < n - S; y++) { const d = p[y] - ref[y + s]; e += d * d; c++; } E[s + S] = e / c; if (e / c < bestE) { bestE = e / c; best = s; } }
+    if (best <= -S || best >= S) return null;
+    const a = E[best + S - 1], b = E[best + S], c = E[best + S + 1]; const den = a - 2 * b + c; return best + (den > 1e-9 ? 0.5 * (a - c) / den : 0);
+  }
+  function rate(seat) {
+    const n = seat.sig.length; if (n < 60) return;
+    const dur = seat.times[n - 1] - seat.times[0]; const fsx = n / dur; const win = Math.min(n, Math.round(24 * fsx));
+    const x = seat.sig.slice(n - win), t = seat.times.slice(n - win); const mean = x.reduce((a, b) => a + b, 0) / win;
+    let bestP = 0, bestF = 0, tot = 0, cnt = 0;
+    for (let f = 0.1; f <= 0.7; f += 0.01) { let re = 0, im = 0; for (let i = 0; i < win; i++) { const ph = 2 * Math.PI * f * (t[i] - t[0]); re += (x[i] - mean) * Math.cos(ph); im += (x[i] - mean) * Math.sin(ph); } const P = re * re + im * im; tot += P; cnt++; if (P > bestP) { bestP = P; bestF = f; } }
+    seat.snr = bestP / (tot / cnt); seat.rr = seat.snr >= 3 ? bestF * 60 : null;
+    const last = x.slice(-Math.round(8 * fsx)); const m2 = last.reduce((a, b) => a + b, 0) / last.length;
+    seat.amp = Math.sqrt(last.reduce((a, b) => a + (b - m2) * (b - m2), 0) / last.length);
+    const full = Math.sqrt(x.reduce((a, b) => a + (b - mean) * (b - mean), 0) / win);
+    seat.apnea = full > 0.5 && seat.amp < 0.25 * full;          // breathing stopped for the last ~8 s
+  }
+  let ui = 0;
+  function frame(now) {
+    const t = now / 1000;
+    for (const seat of seats) {
+      const { p, q } = profiles(seat); seat.hist.push({ p, q, t }); while (seat.hist.length > 2 && seat.hist[0].t < t - 0.6) seat.hist.shift();
+      let ref = null; for (const h of seat.hist) if (h.t <= t - 0.4) ref = h;
+      let dy = 0; if (ref) { const vy = shift(p, ref.p, 6), vx = shift(q, ref.q, 6); if (vy !== null && vx !== null && Math.abs(vx) < 2) dy = vy; }
+      seat.disp = 0.97 * seat.disp + dy; seat.sig.push(seat.disp); seat.times.push(t); if (seat.sig.length > 1500) { seat.sig.shift(); seat.times.shift(); }
+    }
+    fpsN++; if (now - fpsT > 1000) { fps = fpsN; fpsN = 0; fpsT = now; }
+    if (now - ui > 200) {
+      ui = now; for (const seat of seats) rate(seat);
+      octx.clearRect(0, 0, ov.width, ov.height); octx.font = `${Math.round(ov.height / 22)}px system-ui`; octx.lineWidth = 4;
+      for (const seat of seats) {
+        const x = (seat.cx - BW / 2) * ov.width, y = (seat.cy - BH / 2) * ov.height, w = BW * ov.width, h = BH * ov.height;
+        const bad = seat.apnea || (seat.rr != null && seat.rr > 24); octx.strokeStyle = bad ? '#ff4d4d' : seat.rr != null ? '#4ade80' : '#ffd166'; octx.strokeRect(x, y, w, h);
+        const txt = seat.apnea ? `${seat.label}: APNEA` : seat.rr != null ? `${seat.label}: ${seat.rr.toFixed(0)} /min` : `${seat.label}: …`;
+        octx.fillStyle = 'rgba(0,0,0,.6)'; octx.fillRect(x, y - ov.height / 18, octx.measureText(txt).width + 16, ov.height / 18); octx.fillStyle = octx.strokeStyle; octx.fillText(txt, x + 8, y - ov.height / 60);
+      }
+      st(`${fps} fps · ${seats.length} seat${seats.length === 1 ? '' : 's'} · tap a chest to add, tap a box to remove`);
+    }
+    loop();
+  }
+  function loop() { if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(frame); else requestAnimationFrame(frame); }
+  setInterval(() => {
+    if (!seats.length) return; const out = {};
+    for (const s of seats) out[s.label] = { rr: s.rr != null ? +s.rr.toFixed(1) : null, snr: +s.snr.toFixed(1), amp: +s.amp.toFixed(2), apnea: !!s.apnea, t: Date.now() / 1000 };
+    fetch(base + '/room', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seats: out }) }).catch(() => {});
+  }, 2000);
+})();
+</script>
+</body>
+</html>

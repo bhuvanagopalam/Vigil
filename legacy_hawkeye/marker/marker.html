@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>HawkEye marker</title>
+<style>
+  html, body { margin: 0; background: #fff; height: 100%; display: flex; align-items: center; justify-content: center; }
+  img { width: 96vw; max-height: 96vh; object-fit: contain; image-rendering: auto; }
+  #hint { position: fixed; bottom: 6px; left: 8px; font: 12px system-ui; color: #888; }
+</style>
+</head>
+<body>
+  <img src="marker.png" alt="marker">
+  <div id="hint">Fullscreen this (⌃⌘F), set brightness to max, measure the image's drawn width with a ruler — that number (in meters) is the marker's physical width in the app. Press H to hide this hint.</div>
+  <script>
+    document.addEventListener('keydown', e => { if (e.key === 'h' || e.key === 'H') document.getElementById('hint').style.display = 'none'; });
+  </script>
+</body>
+</html>

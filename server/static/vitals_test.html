@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>vitals test</title>
+<style>
+  :root { color-scheme: dark; } * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; color: #eee; font: 14px -apple-system, system-ui, sans-serif; }
+  #stage { position: relative; width: 100%; height: 70vh; background: #111; }
+  video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  canvas { pointer-events: none; }
+  #bar { padding: 8px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { font-size: 15px; padding: 10px 12px; border-radius: 9px; border: 0; background: #2b6cff; color: #fff; }
+  button.alt { background: #444; } button.on { background: #c0392b; }
+  #s { color: #9fd; font-variant-numeric: tabular-nums; }
+  #white { position: fixed; inset: 0; background: #fff; display: none; }
+</style>
+</head>
+<body>
+<div id="white"></div>
+<div id="stage"><video id="v" playsinline muted autoplay></video><canvas id="ov"></canvas></div>
+<div id="bar">
+  <button id="face">Face (front cam)</button>
+  <button id="finger">Finger (rear cam + torch)</button>
+  <button id="send" class="alt" disabled>Send: off</button>
+  <input id="dev" placeholder="device" style="font-size:14px;padding:8px;border-radius:6px;border:1px solid #555;background:#111;color:#eee;width:110px">
+  <span id="s">—</span>
+</div>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const v = $('v'), ov = $('ov'), octx = ov.getContext('2d');
+  const A = document.createElement('canvas'); A.width = 160; A.height = 90; const actx = A.getContext('2d', { willReadFrequently: true });
+  const base = location.origin; let mode = null, sending = false, buf = [], fps = 0, nfr = 0, tfps = performance.now(), stream = null;
+  $('dev').value = localStorage.getItem('dev') || ''; $('dev').oninput = e => localStorage.setItem('dev', e.target.value.trim());
+  const st = m => { $('s').textContent = m; };
+  async function start(front) {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: front ? 'user' : 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } }, audio: false });
+    v.srcObject = stream; await v.play();
+    const tr = stream.getVideoTracks()[0]; const se = tr.getSettings();
+    if (!front) { try { await tr.applyConstraints({ advanced: [{ torch: true }] }); st('torch requested'); } catch (e) { st('torch not available: ' + e.message); } }
+    mode = front ? 'face' : 'finger'; $('send').disabled = false;
+    try { await navigator.wakeLock.request('screen'); } catch (e) {}
+    st(`${mode}: ${se.width}×${se.height} @ ${se.frameRate || '?'}`);
+    loop();
+  }
+  $('face').onclick = () => start(true);
+  $('finger').onclick = () => start(false);
+  $('send').onclick = () => { sending = !sending; $('send').textContent = 'Send: ' + (sending ? 'ON' : 'off'); $('send').className = sending ? 'on' : 'alt'; };
+  function frame(now, meta) {
+    actx.drawImage(v, 0, 0, 160, 90);
+    // face: central box (40% x 50%); finger: whole frame
+    const x0 = mode === 'face' ? 48 : 0, x1 = mode === 'face' ? 112 : 160, y0 = mode === 'face' ? 18 : 0, y1 = mode === 'face' ? 72 : 90;
+    const px = actx.getImageData(x0, y0, x1 - x0, y1 - y0).data; let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < px.length; i += 4) { r += px[i]; g += px[i + 1]; b += px[i + 2]; n++; }
+    const t = (meta && typeof meta.captureTime === 'number') ? meta.captureTime / 1000 : now / 1000;
+    buf.push([+t.toFixed(4), +(r / n).toFixed(2), +(g / n).toFixed(2), +(b / n).toFixed(2)]);
+    nfr++; if (now - tfps > 1000) { fps = nfr; nfr = 0; tfps = now; st(`${mode} ${fps} fps  rgb ${(r/n).toFixed(0)},${(g/n).toFixed(0)},${(b/n).toFixed(0)}  ${sending ? 'SENDING' : ''}`); }
+    if (ov.width !== v.videoWidth) { ov.width = v.videoWidth; ov.height = v.videoHeight; }
+    octx.clearRect(0, 0, ov.width, ov.height); octx.strokeStyle = '#0f8'; octx.lineWidth = 4;
+    if (mode === 'face') octx.strokeRect(ov.width * 0.3, ov.height * 0.2, ov.width * 0.4, ov.height * 0.6);
+    loop();
+  }
+  function loop() { if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(frame); else requestAnimationFrame(n => frame(n, null)); }
+  setInterval(() => {
+    if (!sending || !buf.length) return; const frames = buf; buf = [];
+    fetch(base + '/vitals', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: $('dev').value || 'unknown', mode, frames }) }).catch(() => {});
+  }, 500);
+})();
+</script>
+</body>
+</html>

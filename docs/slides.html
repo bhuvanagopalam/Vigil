@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vigil</title>
+<style>
+  html, body { margin: 0; background: #fff; color: #000; font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  .slide { display: none; min-height: 100vh; box-sizing: border-box; padding: 9vh 10vw; }
+  .slide.active { display: flex; flex-direction: column; justify-content: center; }
+  h1 { font-size: 7vh; font-weight: 600; margin: 0 0 4vh; line-height: 1.15; }
+  p { font-size: 3.6vh; line-height: 1.45; margin: 0 0 2.2vh; }
+  .stat { font-size: 6vh; font-weight: 600; margin: 3vh 0 0.6vh; line-height: 1.1; }
+  .src { font-size: 2.2vh; color: #555; margin: 0 0 1vh; }
+  svg text { font-family: inherit; }
+  .hint { position: fixed; bottom: 2vh; right: 2vw; font-size: 1.8vh; color: #aaa; }
+  .cam { padding-top: 6vh; padding-bottom: 5vh; } .cam h1 { margin-bottom: 2vh; } .cam p { font-size: 3vh; margin-bottom: 1.2vh; }
+  .two { padding-top: 6vh; padding-bottom: 6vh; } .two h1 { margin-bottom: 2.5vh; } .two p { font-size: 3vh; margin-bottom: 1.6vh; } .two .src { font-size: 2vh; }
+  @media print {
+    .slide { display: flex !important; flex-direction: column; justify-content: center; page-break-after: always; min-height: 100vh; }
+    .hint { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<section class="slide active" style="align-items:center; text-align:center">
+  <h1 style="font-size:12vh; margin-bottom:3vh">Vigil</h1>
+  <p>Rushendra Sidibomma and Bhuvana Gopalam</p>
+</section>
+
+<section class="slide">
+  <h1>Connect and Intersect</h1>
+  <p><b>Connect:</b> every phone in a waiting room to one nurse.</p>
+  <p><b>Intersect:</b> the moment a patient gets worse and the moment someone notices.</p>
+  <p>Today those two moments are hours apart.</p>
+  <p style="margin-top:5vh"><b>Vigil.</b> The waiting room gets a monitor.</p>
+</section>
+
+<section class="slide">
+  <h1>Triage is a snapshot.</h1>
+  <p>Two minutes at arrival: stable, wait.</p>
+  <p>Then hours in a chair. Re-checks while waiting are local policy, hours apart, and audits find them missed.</p>
+  <p>Early sepsis, slow bleeding, a heart attack in progress: the body compensates, then it doesn't.</p>
+  <p><b>Waiting is where people get worse unseen.</b></p>
+</section>
+
+<section class="slide">
+  <h1>The cost of not noticing</h1>
+  <p class="stat">23,003 excess deaths</p>
+  <p>England, 2022, linked to waits over 12 hours in emergency departments.</p>
+  <p class="src">Royal College of Emergency Medicine, 2023</p>
+  <p class="stat">1 extra death for every 82 patients</p>
+  <p>who wait 6 to 8 hours. Risk rises steadily after hour 5.</p>
+  <p class="src">Jones et al., Emergency Medicine Journal, 2022. 5.2 million patients</p>
+  <p class="stat">4% higher odds of death per hour</p>
+  <p>of delay in treating sepsis.</p>
+  <p class="src">Seymour et al., New England Journal of Medicine, 2017. 49,331 patients</p>
+</section>
+
+<section class="slide">
+  <h1>What we built</h1>
+  <svg viewBox="0 0 1200 400" width="100%" style="max-height:62vh" xmlns="http://www.w3.org/2000/svg">
+    <defs><marker id="a" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#000"/></marker></defs>
+    <g fill="none" stroke="#000" stroke-width="2">
+      <rect x="20" y="40" width="340" height="230" rx="6"/>
+      <rect x="430" y="40" width="340" height="230" rx="6"/>
+      <rect x="840" y="40" width="340" height="230" rx="6"/>
+      <rect x="430" y="310" width="340" height="80" rx="6"/>
+      <line x1="360" y1="155" x2="428" y2="155" marker-end="url(#a)"/>
+      <line x1="770" y1="155" x2="838" y2="155" marker-end="url(#a)"/>
+      <path d="M770,350 L1010,350 L1010,272" marker-end="url(#a)"/>
+    </g>
+    <g font-size="24" fill="#000">
+      <text x="40" y="80" font-weight="600">Patient's phone</text>
+      <text x="40" y="125">scan a QR, no app</text>
+      <text x="40" y="160">20 s finger on camera</text>
+      <text x="40" y="195">press 4 s, relax 6 s</text>
+      <text x="450" y="80" font-weight="600">Laptop</text>
+      <text x="450" y="125">pulse waveform to</text>
+      <text x="450" y="160">heart rate, breathing,</text>
+      <text x="450" y="195">HRV, perfusion, refill</text>
+      <text x="450" y="230">score, trend, risk</text>
+      <text x="860" y="80" font-weight="600">Nurse board</text>
+      <text x="860" y="125">everyone, ranked</text>
+      <text x="860" y="160">with reasons</text>
+      <text x="860" y="195">re-check, find, seen</text>
+      <text x="860" y="230">every 15 minutes</text>
+      <text x="450" y="343" font-weight="600">Room camera</text>
+      <text x="450" y="376">breathing per chair</text>
+    </g>
+  </svg>
+</section>
+
+<section class="slide two">
+  <h1>How a phone measures it</h1>
+  <div style="display:flex; gap:6vw; align-items:flex-start">
+    <div style="flex:1">
+      <p><b>Pulse.</b> The flash lights the fingertip and the camera watches the glow. Each heartbeat pushes more blood into the finger, which absorbs more light, so the red channel dips once per beat.</p>
+      <p>20 seconds of that is a pulse waveform, the same signal as a hospital finger clip. Beat spacing gives heart rate, its variation gives HRV, the slow swell under the beats gives breathing.</p>
+      <svg viewBox="0 0 560 100" width="100%" style="max-height:14vh"><path d="M0.4,88.1 L3.5,81.3 L6.6,54.5 L9.8,23.3 L12.9,9.6 L16.0,15.2 L19.1,27.9 L22.3,40.2 L25.4,51.9 L28.5,61.9 L31.7,66.4 L34.8,64.3 L37.9,59.9 L41.1,57.6 L44.2,58.2 L47.3,60.2 L50.5,63.3 L53.7,68.4 L56.8,75.3 L59.9,81.5 L63.1,85.1 L66.2,85.9 L69.4,86.0 L72.5,88.3 L75.5,90.0 L78.7,77.3 L82.0,44.4 L85.0,11.4 L88.2,1.3 L91.3,11.6 L94.5,27.3 L97.6,42.0 L100.8,55.3 L103.9,64.6 L107.1,67.9 L110.2,66.2 L113.3,62.7 L116.5,60.5 L119.5,61.4 L122.7,65.0 L125.9,69.5 L129.0,73.8 L132.0,77.8 L135.2,81.0 L138.3,82.6 L141.5,82.7 L144.6,83.9 L147.7,85.6 L150.8,75.9 L154.0,46.2 L157.2,13.0 L160.3,0.0 L163.4,6.9 L166.6,19.3 L169.9,31.6 L172.9,45.1 L176.1,58.2 L179.2,66.0 L182.3,67.4 L185.4,65.1 L188.6,62.9 L191.7,63.2 L194.8,66.1 L198.0,69.7 L201.0,72.3 L204.2,74.4 L207.4,76.6 L210.5,78.4 L213.6,79.4 L216.7,81.8 L219.9,85.9 L223.0,81.3 L226.1,57.8 L229.3,26.5 L232.4,9.7 L235.6,12.3 L238.7,22.5 L241.9,33.3 L244.9,44.3 L248.0,53.9 L251.1,59.5 L254.3,61.3 L257.4,61.0 L260.6,60.5 L263.6,61.5 L266.9,64.8 L270.1,69.4 L273.2,73.7 L276.3,77.4 L279.4,80.5 L282.6,82.5 L285.7,83.6 L288.8,85.9 L291.9,88.0 L295.1,79.0 L298.3,51.6 L301.4,20.6 L304.5,7.0 L307.6,12.4 L310.7,24.7 L313.8,36.9 L317.0,48.4 L320.2,58.3 L323.2,64.8 L326.4,66.9 L329.5,66.0 L332.7,64.5 L335.9,64.8 L339.0,67.3 L342.1,71.3 L345.2,75.0 L348.4,77.2 L351.5,78.0 L353.0,78.1 L357.8,79.0 L359.3,82.6 L362.4,84.5 L365.9,70.9 L370.2,41.4 L371.8,16.4 L374.8,9.5 L378.0,16.3 L381.1,27.9 L384.3,39.7 L387.4,51.0 L390.6,60.8 L393.8,66.1 L397.4,66.5 L400.1,64.7 L403.1,63.8 L406.3,64.6 L409.4,67.0 L412.5,70.1 L415.7,73.4 L418.8,76.2 L421.9,78.0 L425.1,78.6 L428.7,80.1 L431.3,83.5 L434.5,80.9 L437.6,61.1 L440.8,30.4 L444.0,11.2 L447.0,13.0 L450.2,25.5 L453.3,37.9 L456.5,48.7 L460.1,58.7 L462.7,66.0 L465.9,67.9 L469.1,65.1 L472.2,61.6 L475.3,61.0 L478.4,63.1 L481.5,66.5 L484.7,70.4 L487.9,74.6 L491.2,78.3 L494.1,80.4 L497.2,81.2 L500.4,82.3 L503.5,81.3 L506.6,69.6 L509.9,44.1 L513.0,18.6 L516.1,9.1 L519.4,15.2 L522.6,26.3 L525.6,36.5 L528.6,46.5 L531.8,55.7 L534.8,61.1 L538.1,61.7 L541.2,60.0 L544.3,59.7 L547.4,62.3 L550.8,66.7 L554.1,71.3 L556.9,75.5 L560.0,78.9" fill="none" stroke="#000" stroke-width="2"/></svg>
+      <p class="src">Real trace from this phone: 6 seconds, 72 beats per minute.</p>
+    </div>
+    <div style="flex:1">
+      <p><b>Capillary refill.</b> Press the finger hard on the lens for 4 seconds: blood is squeezed out and the red brightens. Relax without lifting: blood floods back and the red falls.</p>
+      <p>Time from release to 90% of the way back is the refill time. Slow refill means poor circulation, an early sign of shock. A nurse times it by eye in whole seconds. The camera times it in hundredths.</p>
+      <svg viewBox="0 0 560 100" width="100%" style="max-height:14vh"><path d="M2.8,9.1 L6.0,7.3 L9.2,5.2 L12.3,2.9 L15.3,0.9 L18.6,0.0 L21.7,1.0 L24.8,3.4 L27.8,6.5 L31.0,9.4 L34.1,11.2 L37.2,12.2 L40.4,12.6 L43.6,11.5 L46.6,10.1 L49.7,8.5 L52.8,7.3 L56.0,7.5 L59.2,8.3 L62.1,9.4 L65.4,10.6 L68.5,11.8 L71.7,12.8 L74.8,13.6 L77.9,14.2 L81.0,14.7 L84.1,15.0 L87.3,15.3 L90.3,15.4 L93.5,15.3 L96.6,15.3 L99.6,15.4 L102.9,15.3 L106.0,14.6 L109.1,13.1 L112.2,11.2 L115.4,9.3 L118.4,7.5 L121.5,5.9 L124.7,4.7 L127.8,4.0 L131.0,4.2 L134.1,5.2 L137.2,6.7 L140.3,8.6 L143.4,10.7 L146.6,13.0 L149.6,15.0 L152.7,16.6 L155.8,17.7 L159.0,18.2 L162.2,18.7 L165.4,19.2 L168.6,20.4 L171.4,23.0 L174.7,27.0 L177.7,32.0 L180.9,37.1 L184.1,41.3 L187.2,44.8 L190.3,47.6 L193.5,49.9 L196.5,51.4 L199.6,52.9 L202.7,55.0 L205.8,59.2 L209.0,65.7 L212.0,73.2 L215.1,80.4 L218.3,85.8 L221.4,88.9 L224.5,90.0 L227.9,89.9 L230.8,89.3 L233.9,88.2 L237.0,86.8 L240.2,84.7 L243.2,82.5 L246.4,82.3 L249.4,84.3 L252.6,86.7 L255.7,89.0 L258.9,88.9 L262.0,86.7 L265.1,83.9 L268.2,80.7 L271.4,77.5 L274.4,74.9 L277.6,73.3 L280.7,72.9 L283.8,73.2 L287.0,73.6 L290.1,73.6 L291.5,73.2 L296.3,72.5 L299.4,71.7 L302.6,70.9 L305.6,70.2 L308.7,69.6 L311.9,69.1 L315.1,68.7 L318.1,68.3 L319.7,67.7 L322.7,68.6 L327.5,70.9 L330.6,73.8 L333.8,76.8 L336.8,78.2 L338.3,77.2 L343.1,75.4 L344.5,72.8 L349.4,70.1 L350.8,67.8 L353.9,65.6 L358.7,64.4 L360.2,63.7 L363.3,63.6 L366.4,63.6 L369.5,63.3 L372.6,62.7 L375.8,61.8 L378.9,60.8 L382.1,59.8 L385.1,58.9 L388.2,58.2 L391.4,57.3 L394.5,56.3 L397.6,55.2 L400.6,54.7 L403.8,56.5 L407.0,59.5 L410.1,63.0 L413.3,65.8 L416.4,66.5 L419.5,65.8 L422.6,64.4 L425.7,62.7 L428.8,61.0 L431.9,59.7 L435.0,59.0 L438.2,59.0 L441.3,59.4 L444.5,59.9 L447.6,60.0 L450.7,59.8 L453.7,59.1 L457.0,58.3 L460.1,57.5 L463.1,56.7 L466.3,56.1 L469.4,55.6 L472.5,55.1 L475.6,54.6 L478.8,55.5 L481.9,58.1 L485.0,61.5 L488.2,64.9 L491.2,66.8 L494.3,66.9 L497.6,65.8 L500.8,64.2 L503.9,62.4 L506.9,60.8 L510.0,59.7 L513.1,59.4 L516.3,59.6 L519.5,60.0 L522.4,60.3 L525.7,60.1 L528.7,59.6 L531.9,58.9 L535.0,58.0 L538.1,57.3 L541.3,56.9 L544.4,56.5 L547.5,56.2 L550.5,56.6 L553.7,58.7 L556.8,61.8 L560.0,65.3" fill="none" stroke="#000" stroke-width="2"/></svg>
+      <p class="src">Real trace from this phone: release, then refill in 0.7 seconds.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide">
+  <h1>Scan. 30 seconds. You're on the board.</h1>
+  <p>Every chair in the waiting room becomes a monitored bed. No app, no wearable, no new hardware. Just the phone already in their hand.</p>
+  <p>Built in 24 hours with two phones and a laptop. Tested on us.</p>
+</section>
+
+<section class="slide cam">
+  <h1>The camera watches every chair</h1>
+  <svg viewBox="0 0 1200 480" width="100%" style="max-height:54vh" xmlns="http://www.w3.org/2000/svg">
+    <g fill="#fff" stroke="#000" stroke-width="2.5" stroke-linecap="round">
+      <rect x="20" y="50" width="1160" height="420" rx="18" stroke-width="2"/>
+      
+      <rect x="105" y="140" width="170" height="240" rx="14"/>
+      <circle cx="190" cy="193" r="27"/>
+      <rect x="138" y="226" width="104" height="112" rx="26"/>
+      <line x1="105" y1="380" x2="105" y2="408"/><line x1="275" y1="380" x2="275" y2="408"/>
+      <rect x="128" y="218" width="124" height="102" rx="6" stroke-dasharray="9 7" stroke-width="3"/>
+      <rect x="380" y="140" width="170" height="240" rx="14"/>
+      <circle cx="465" cy="193" r="27"/>
+      <rect x="413" y="226" width="104" height="112" rx="26"/>
+      <line x1="380" y1="380" x2="380" y2="408"/><line x1="550" y1="380" x2="550" y2="408"/>
+      <rect x="403" y="218" width="124" height="102" rx="6" stroke-dasharray="9 7" stroke-width="3"/>
+      <rect x="655" y="140" width="170" height="240" rx="14"/>
+      <circle cx="740" cy="193" r="27"/>
+      <rect x="688" y="226" width="104" height="112" rx="26"/>
+      <line x1="655" y1="380" x2="655" y2="408"/><line x1="825" y1="380" x2="825" y2="408"/>
+      <rect x="678" y="218" width="124" height="102" rx="6" stroke-dasharray="9 7" stroke-width="3"/>
+      <rect x="930" y="140" width="170" height="240" rx="14"/>
+      <circle cx="1015" cy="193" r="27"/>
+      <rect x="963" y="226" width="104" height="112" rx="26"/>
+      <line x1="930" y1="380" x2="930" y2="408"/><line x1="1100" y1="380" x2="1100" y2="408"/>
+    </g>
+    <g fill="#000">
+      <text x="40" y="82" font-size="20" fill="#777">staff phone on a stand, pointed at the waiting room</text>
+      
+      <text x="190" y="122" text-anchor="middle" font-size="26" font-weight="600">seat 1</text>
+      <text x="190" y="452" text-anchor="middle" font-size="30" font-weight="600">14 /min</text>
+      <text x="465" y="122" text-anchor="middle" font-size="26" font-weight="600">seat 2</text>
+      <text x="465" y="452" text-anchor="middle" font-size="30" font-weight="600">12 /min</text>
+      <text x="740" y="122" text-anchor="middle" font-size="26" font-weight="600">seat 3</text>
+      <text x="740" y="452" text-anchor="middle" font-size="30" font-weight="700">APNEA</text>
+      <text x="1015" y="122" text-anchor="middle" font-size="26" fill="#777">seat 4</text>
+      <text x="1015" y="452" text-anchor="middle" font-size="26" fill="#777">tap to add</text>
+    </g>
+  </svg>
+  <p>Tap each chest once, type the chair number. Breathing per chair, live, between finger checks.</p>
+  <p>Breathing stops for 8 seconds: the seat flags, and so does that patient's row.</p>
+</section>
+
+<div class="hint">arrow keys, F for fullscreen, cmd-P for PDF</div>
+<script>
+  const slides = [...document.querySelectorAll('.slide')]; let i = 0;
+  const go = n => { slides[i].classList.remove('active'); i = (n + slides.length) % slides.length; slides[i].classList.add('active'); };
+  if (/^#\d+$/.test(location.hash)) go(parseInt(location.hash.slice(1), 10) - 1);
+  document.addEventListener('keydown', e => {
+    if (['ArrowRight', ' ', 'PageDown'].includes(e.key)) go(i + 1);
+    else if (['ArrowLeft', 'PageUp'].includes(e.key)) go(i - 1);
+    else if (e.key === 'f' || e.key === 'F') document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+  });
+  document.addEventListener('click', e => { if (e.clientX > innerWidth / 2) go(i + 1); else go(i - 1); });
+</script>
+</body>
+</html>
